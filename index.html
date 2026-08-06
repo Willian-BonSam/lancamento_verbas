@@ -308,6 +308,31 @@ let FILTERS = {
 };
 let lastDupId = null; // id of row most recently updated via merge, for highlight
 
+// ===== Lançamento multi-servidor (mesma verba/tipo/protocolo para vários servidores) =====
+let MULTI_MODE = { verbas: false, fundacoes: false };
+let MULTI = { verbas: [], fundacoes: [] }; // cada item: {m, n, s, valor, referencia}
+
+function multiRowsHTML(key){
+  const list = MULTI[key];
+  const tipoEl = document.getElementById(key+'_tipo');
+  const isRef = tipoEl ? tipoEl.value === 'referencia' : false;
+  if(list.length === 0){
+    return `<div class="hint">Nenhum servidor adicionado ainda. Busque acima e clique para adicionar.</div>`;
+  }
+  return `<table><thead><tr><th>Matrícula</th><th>Nome</th><th>${isRef?'Referência':'Valor (R$)'}</th><th></th></tr></thead><tbody>
+    ${list.map((it,i)=>`
+      <tr>
+        <td class="mono">${it.m}</td>
+        <td>${it.n}</td>
+        <td>${isRef
+          ? `<input type="text" data-multi-i="${i}" data-multi-field="referencia" value="${it.referencia||''}" placeholder="Ex.: 12,75" style="width:100%;">`
+          : `<input type="number" step="0.01" data-multi-i="${i}" data-multi-field="valor" value="${it.valor||''}" placeholder="0,00" style="width:100%;">`}
+        </td>
+        <td><button type="button" class="btn btn-ghost btn-sm" data-multi-remove="${i}">Remover</button></td>
+      </tr>`).join('')}
+  </tbody></table>`;
+}
+
 function compLabel(comp){
   const [y,m] = comp.split('-');
   const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -657,22 +682,35 @@ function panelLancamento(key, dsLabel, dataset, baseKey){
       Base com ${dataset.length} servidor(es)${meta ? ` · atualizada manualmente em ${fmtDate(meta.date)}` : ' · base original da planilha'}.
       Vá em <b>Base de Servidores</b> para atualizar mensalmente.
     </div>
-    <div class="grid">
-      <div class="field" style="grid-column:1/3;">
-        <label>Nome do servidor</label>
-        <input type="text" id="${key}_nome" placeholder="Digite o nome, sem acentos, conforme cadastro..." autocomplete="off">
-        <div class="autocomplete-list" id="${key}_ac" style="display:none;"></div>
-      </div>
-      <div class="field">
-        <label>Matrícula</label>
-        <input type="text" id="${key}_mat" readonly placeholder="—">
-      </div>
-      <div class="field">
-        <label>Situação</label>
-        <input type="text" id="${key}_sit" readonly placeholder="—">
-      </div>
+    <div class="field" style="margin-bottom:10px;">
+      <label style="margin:0;"><input type="checkbox" id="${key}_multi_toggle" ${MULTI_MODE[key]?'checked':''}> Lançar esta verba para vários servidores de uma vez</label>
     </div>
-    <div id="${key}_alert"></div>
+    <div id="${key}_single_wrap" style="display:${MULTI_MODE[key]?'none':''}">
+      <div class="grid">
+        <div class="field" style="grid-column:1/3;">
+          <label>Nome do servidor</label>
+          <input type="text" id="${key}_nome" placeholder="Digite o nome, sem acentos, conforme cadastro..." autocomplete="off">
+          <div class="autocomplete-list" id="${key}_ac" style="display:none;"></div>
+        </div>
+        <div class="field">
+          <label>Matrícula</label>
+          <input type="text" id="${key}_mat" readonly placeholder="—">
+        </div>
+        <div class="field">
+          <label>Situação</label>
+          <input type="text" id="${key}_sit" readonly placeholder="—">
+        </div>
+      </div>
+      <div id="${key}_alert"></div>
+    </div>
+    <div id="${key}_multi_wrap" style="display:${MULTI_MODE[key]?'':'none'};margin-bottom:10px;">
+      <div class="field" style="position:relative;">
+        <label>Buscar e adicionar servidores</label>
+        <input type="text" id="${key}_multi_busca" placeholder="Digite o nome, sem acentos, conforme cadastro..." autocomplete="off">
+        <div class="autocomplete-list" id="${key}_multi_ac" style="display:none;"></div>
+      </div>
+      <div id="${key}_multi_list" style="margin-top:10px;">${multiRowsHTML(key)}</div>
+    </div>
     <div class="grid3" style="margin-top:10px;">
       <div class="field" style="position:relative;">
         <label>Verba / Código</label>
@@ -692,7 +730,7 @@ function panelLancamento(key, dsLabel, dataset, baseKey){
         <input type="text" id="${key}_protocolo" placeholder="Ex.: 376138/2026">
       </div>
     </div>
-    <div class="grid" style="margin-top:10px;">
+    <div class="grid" style="margin-top:10px;display:${MULTI_MODE[key]?'none':''}" id="${key}_valorref_grid">
       <div class="field" id="${key}_valor_wrap">
         <label>Valor (R$)</label>
         <input type="number" step="0.01" id="${key}_valor" placeholder="0,00">
@@ -841,6 +879,47 @@ function wireLancamento(key, dataset){
     const isRef = tipoEl.value === 'referencia';
     valorWrap.style.display = isRef ? 'none' : '';
     refWrap.style.display = isRef ? '' : 'none';
+    const multiListEl = document.getElementById(key+'_multi_list');
+    if(multiListEl) multiListEl.innerHTML = multiRowsHTML(key);
+  });
+
+  // ---- Modo múltiplos servidores ----
+  const multiToggle = document.getElementById(key+'_multi_toggle');
+  const singleWrap = document.getElementById(key+'_single_wrap');
+  const multiWrap = document.getElementById(key+'_multi_wrap');
+  const valorRefGrid = document.getElementById(key+'_valorref_grid');
+  multiToggle.addEventListener('change', ()=>{
+    MULTI_MODE[key] = multiToggle.checked;
+    singleWrap.style.display = MULTI_MODE[key] ? 'none' : '';
+    multiWrap.style.display = MULTI_MODE[key] ? '' : 'none';
+    valorRefGrid.style.display = MULTI_MODE[key] ? 'none' : '';
+  });
+
+  const multiBusca = document.getElementById(key+'_multi_busca');
+  const multiAc = document.getElementById(key+'_multi_ac');
+  const multiListEl = document.getElementById(key+'_multi_list');
+  attachAutocomplete(multiBusca, multiAc, dataset,
+    it => it.n,
+    it => it.m,
+    it => it.s,
+    it => {
+      if(MULTI[key].some(x=>x.m===it.m)){ toast('Esse servidor já está na lista.'); multiBusca.value=''; return; }
+      MULTI[key].push({ m: it.m, n: it.n, s: it.s, valor:'', referencia:'' });
+      multiBusca.value = '';
+      multiListEl.innerHTML = multiRowsHTML(key);
+    }
+  );
+  multiListEl.addEventListener('input', (e)=>{
+    const i = e.target.dataset.multiI;
+    const field = e.target.dataset.multiField;
+    if(i===undefined || !field) return;
+    MULTI[key][i][field] = e.target.value;
+  });
+  multiListEl.addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-multi-remove]');
+    if(!btn) return;
+    MULTI[key].splice(Number(btn.dataset.multiRemove), 1);
+    multiListEl.innerHTML = multiRowsHTML(key);
   });
 
   const editIdEl = document.getElementById(key+'_editid');
@@ -863,14 +942,45 @@ function wireLancamento(key, dataset){
     tipoEl.value = 'valor';
     valorWrap.style.display=''; refWrap.style.display='none';
     picked=null; verbaPicked=null;
+    MULTI[key] = [];
+    const mlEl = document.getElementById(key+'_multi_list');
+    if(mlEl) mlEl.innerHTML = multiRowsHTML(key);
     resetEditMode();
   });
 
   addBtn.addEventListener('click', async ()=>{
     const tipo = tipoEl.value;
+    const protocolo = document.getElementById(key+'_protocolo').value.trim();
+
+    if(MULTI_MODE[key] && !editIdEl.value){
+      if(!verbaPicked){ toast('Selecione a verba na lista de sugestões.'); return; }
+      if(MULTI[key].length === 0){ toast('Adicione ao menos um servidor à lista.'); return; }
+      const faltando = MULTI[key].some(it => tipo==='valor' ? !(parseFloat(it.valor)>0) : !it.referencia);
+      if(faltando){ toast(tipo==='valor' ? 'Preencha um valor válido para todos os servidores da lista.' : 'Preencha a referência para todos os servidores da lista.'); return; }
+
+      let adicionados = 0, combinados = 0;
+      for(const it of MULTI[key]){
+        const {matricula, contrato} = splitMat(it.m);
+        const result = await addLancamentoEntry(key, {
+          matricula, contrato,
+          nome: it.n,
+          situacao: it.s,
+          verbaCodigo: verbaPicked.codigo,
+          verbaNome: verbaPicked.nome,
+          tipo, valor: tipo==='valor'?parseFloat(it.valor):0, referencia: tipo==='referencia'?it.referencia:'',
+          protocolo
+        }, true);
+        if(result.status === 'merged') combinados++; else if(result.status === 'added') adicionados++;
+      }
+      toast(`${adicionados} lançamento(s) adicionado(s)${combinados?`, ${combinados} combinado(s) com existentes`:''}.`);
+      MULTI[key] = [];
+      document.getElementById(key+'_clear').click();
+      render();
+      return;
+    }
+
     const valor = parseFloat(document.getElementById(key+'_valor').value);
     const referencia = document.getElementById(key+'_referencia').value.trim();
-    const protocolo = document.getElementById(key+'_protocolo').value.trim();
     if(!picked){ toast('Selecione o servidor na lista de sugestões.'); return; }
     if(!verbaPicked){ toast('Selecione a verba na lista de sugestões.'); return; }
     if(tipo === 'valor' && (!valor || valor <= 0)){ toast('Informe um valor válido.'); return; }
